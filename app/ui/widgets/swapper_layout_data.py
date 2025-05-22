@@ -414,16 +414,60 @@ SWAPPER_LAYOUT_DATA: LayoutDictTypes = {
             'requiredToggleValue': True,
             'help': 'Grows or shrinks the occluded region.'
         },
+        'DFLXSegSizeInsideFaceSlider': {
+            'level': 2,
+            'label': 'Size Inside Face',
+            'min_value': '-20',
+            'max_value': '20',
+            'default': '0',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Grows or shrinks the XSeg mask for the area inside the face.'
+        },
+        'DFLXSegSizeOutsideFaceSlider': {
+            'level': 2,
+            'label': 'Size Outside Face',
+            'min_value': '-20',
+            'max_value': '20',
+            'default': '0',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Grows or shrinks the XSeg mask for the area outside the face.'
+        },
         'OccluderXSegBlurSlider': {
             'level': 1,
-            'label': 'Occluder/DFL XSeg Blur',
+            'label': 'Occluder Blur',
             'min_value': '0',
             'max_value': '100',
             'default': '0',
             'step': 1,
-            'parentToggle': 'OccluderEnableToggle | DFLXSegEnableToggle',
+            'parentToggle': 'OccluderEnableToggle',
             'requiredToggleValue': True,
-            'help': 'Blend value for Occluder and XSeg.'
+            'help': 'Blend value for Occluder.'
+        },
+        'DFLXSegBlurInsideFaceSlider': {
+            'level': 2,
+            'label': 'DFL XSeg Blur Inside Face',
+            'min_value': '0',
+            'max_value': '100',
+            'default': '0',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Blend value for DFL XSeg mask inside the face.'
+        },
+        'DFLXSegBlurOutsideFaceSlider': {
+            'level': 2,
+            'label': 'DFL XSeg Blur Outside Face',
+            'min_value': '0',
+            'max_value': '100',
+            'default': '0',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Blend value for DFL XSeg mask outside the face.'
         },
         'XSegMouthEnableToggle': {
             'level': 1,
