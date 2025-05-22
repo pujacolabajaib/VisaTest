@@ -51,7 +51,6 @@ class ModelsProcessor(QtCore.QObject):
         self.device = device
         self.model_lock = threading.RLock()  # Reentrant lock for model access
         self.trt_ep_options = {
-            # 'trt_max_workspace_size': 3 << 30,  # Dimensione massima dello spazio di lavoro in bytes
             'trt_engine_cache_enable': True,
             'trt_engine_cache_path': "tensorrt-engines",
             'trt_timing_cache_enable': True,
@@ -68,25 +67,23 @@ class ModelsProcessor(QtCore.QObject):
         self.nThreads = 2
         self.syncvec = torch.empty((1, 1), dtype=torch.float32, device=self.device)
 
-        # Initialize models and models_path
         self.models: Dict[str, onnxruntime.InferenceSession] = {}
         self.models_path = {}
         self.models_data = {}
         for model_data in models_list:
             model_name, model_path = model_data['model_name'], model_data['local_path']
-            self.models[model_name] = None #Model Instance
+            self.models[model_name] = None
             self.models_path[model_name] = model_path
             self.models_data[model_name] = {'local_path': model_data['local_path'], 'hash': model_data['hash'], 'url': model_data.get('url')}
 
         self.dfm_models: Dict[str, DFMModel] = {}
 
         if TENSORRT_AVAILABLE:
-            # Initialize models_trt and models_trt_path
             self.models_trt = {}
             self.models_trt_path = {}
             for model_data in models_trt_list:
                 model_name, model_path = model_data['model_name'], model_data['local_path']
-                self.models_trt[model_name] = None #Model Instance
+                self.models_trt[model_name] = None
                 self.models_trt_path[model_name] = model_path
 
         self.face_detectors = FaceDetectors(self)
@@ -115,31 +112,22 @@ class ModelsProcessor(QtCore.QObject):
             384, 385, 386, 387, 388, 389, 390, 397, 398, 400, 402, 405, 409, 415, 454,
             466, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477
         ]
-
-        self.normalize = v2.Normalize(mean = [ 0., 0., 0. ],
-                                      std = [ 1/1.0, 1/1.0, 1/1.0 ])
-        
+        self.normalize = v2.Normalize(mean = [ 0., 0., 0. ], std = [ 1/1.0, 1/1.0, 1/1.0 ])
         self.lp_mask_crop = self.face_editors.lp_mask_crop
         self.lp_lip_array = self.face_editors.lp_lip_array
 
     def load_model(self, model_name, session_options=None):
         with self.model_lock:
             self.main_window.model_loading_signal.emit()
-            # QApplication.processEvents()
-            # if not is_file_exists(self.models_path[model_name]):
-            #     download_file(model_name, self.models_path[model_name], self.models_data[model_name]['hash'], self.models_data[model_name]['url'])
             if session_options is None:
                 model_instance = onnxruntime.InferenceSession(self.models_path[model_name], providers=self.providers)
             else:
                 model_instance = onnxruntime.InferenceSession(self.models_path[model_name], sess_options=session_options, providers=self.providers)
-
-            # Check if another thread has already loaded an instance for this model, if yes then delete the current one and return that instead
             if self.models[model_name]:
                 del model_instance
                 gc.collect()
                 return self.models[model_name]
             self.main_window.model_loaded_signal.emit()
-
             return model_instance
 
     def load_dfm_model(self, dfm_model):
@@ -149,34 +137,27 @@ class ModelsProcessor(QtCore.QObject):
                 max_models_to_keep = self.main_window.control['MaxDFMModelsSlider']
                 total_loaded_models = len(self.dfm_models)
                 if total_loaded_models==max_models_to_keep:
-                    print("Clearing DFM Model")
                     model_name, model_instance = list(self.dfm_models.items())[0]
                     del model_instance
                     self.dfm_models.pop(model_name)
                     gc.collect()
                 try:
                     self.dfm_models[dfm_model] = DFMModel(self.main_window.dfm_models_data[dfm_model], self.providers, self.device)
-                except:
+                except Exception:
                     traceback.print_exc()   
                     self.dfm_models[dfm_model] = None         
                 self.main_window.model_loaded_signal.emit()
             return self.dfm_models[dfm_model]
 
-
     def load_model_trt(self, model_name, custom_plugin_path=None, precision='fp16', debug=False):
-        # self.showModelLoadingProgressBar()
-        #time.sleep(0.5)
         self.main_window.model_loading_signal.emit()
-
         if not os.path.exists(self.models_trt_path[model_name]):
             onnx2trt(onnx_model_path=self.models_path[model_name],
                      trt_model_path=self.models_trt_path[model_name],
                      precision=precision,
                      custom_plugin_path=custom_plugin_path,
-                     verbose=False
-                    )
+                     verbose=False)
         model_instance = TensorRTPredictor(model_path=self.models_trt_path[model_name], custom_plugin_path=custom_plugin_path, pool_size=self.nThreads, device=self.device, debug=debug)
-
         self.main_window.model_loaded_signal.emit()
         return model_instance
 
@@ -192,10 +173,9 @@ class ModelsProcessor(QtCore.QObject):
             for model_data in models_trt_list:
                 model_name = model_data['model_name']
                 if isinstance(self.models_trt[model_name], TensorRTPredictor):
-                    # È un'istanza di TensorRTPredictor
                     self.models_trt[model_name].cleanup()
                     del self.models_trt[model_name]
-                    self.models_trt[model_name] = None #Model Instance
+                    self.models_trt[model_name] = None
             gc.collect()
 
     def delete_models_dfm(self):
@@ -203,10 +183,8 @@ class ModelsProcessor(QtCore.QObject):
         for model_name, model_instance in self.dfm_models.items():
             del model_instance
             keys_to_remove.append(model_name)
-        
         for model_name in keys_to_remove:
             self.dfm_models.pop(model_name)
-        
         self.clip_session = []
         gc.collect()
 
@@ -226,27 +204,18 @@ class ModelsProcessor(QtCore.QObject):
                                 ('CPUExecutionProvider')
                             ]
                 self.device = 'cuda'
-                if version.parse(trt.__version__) < version.parse("10.2.0") and provider_name == "TensorRT-Engine":
+                if TENSORRT_AVAILABLE and version.parse(trt.__version__) < version.parse("10.2.0") and provider_name == "TensorRT-Engine":
                     print("TensorRT-Engine provider cannot be used when TensorRT version is lower than 10.2.0.")
                     provider_name = "TensorRT"
-
             case "CPU":
-                providers = [
-                                ('CPUExecutionProvider')
-                            ]
+                providers = [('CPUExecutionProvider')]
                 self.device = 'cpu'
             case "CUDA":
-                providers = [
-                                ('CUDAExecutionProvider'),
-                                ('CPUExecutionProvider')
-                            ]
+                providers = [('CUDAExecutionProvider'), ('CPUExecutionProvider')]
                 self.device = 'cuda'
-            #case _:
-
         self.providers = providers
         self.provider_name = provider_name
         self.lp_mask_crop = self.lp_mask_crop.to(self.device)
-
         return self.provider_name
 
     def set_number_of_threads(self, value):
@@ -254,24 +223,24 @@ class ModelsProcessor(QtCore.QObject):
         self.delete_models_trt()
 
     def get_gpu_memory(self):
-        command = "nvidia-smi --query-gpu=memory.total --format=csv"
-        memory_total_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
-        memory_total = [int(x.split()[0]) for i, x in enumerate(memory_total_info)]
-
-        command = "nvidia-smi --query-gpu=memory.free --format=csv"
-        memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
-        memory_free = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
-
-        memory_used = memory_total[0] - memory_free[0]
-
-        return memory_used, memory_total[0]
+        try:
+            command = "nvidia-smi --query-gpu=memory.total --format=csv"
+            memory_total_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+            memory_total = [int(x.split()[0]) for i, x in enumerate(memory_total_info)]
+            command = "nvidia-smi --query-gpu=memory.free --format=csv"
+            memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+            memory_free = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+            memory_used = memory_total[0] - memory_free[0]
+            return memory_used, memory_total[0]
+        except Exception:
+            return 0,0 # Return 0 if nvidia-smi is not found or fails
     
     def clear_gpu_memory(self):
         self.delete_models()
         self.delete_models_dfm()
         self.delete_models_trt()
-        torch.cuda.empty_cache()
-
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def load_inswapper_iss_emap(self, model_name):
         with self.model_lock:
@@ -334,7 +303,7 @@ class ModelsProcessor(QtCore.QObject):
         return self.frame_enhancers.run_deoldify_artistic(image, output)
 
     def run_deoldify_stable(self, image, output):
-        return self.frame_enhancers.run_deoldify_artistic(image, output)
+        return self.frame_enhancers.run_deoldify_artistic(image, output) # Note: Should this be run_deoldify_stable?
     
     def run_deoldify_video(self, image, output):
         return self.frame_enhancers.run_deoldify_video(image, output)
@@ -390,8 +359,9 @@ class ModelsProcessor(QtCore.QObject):
     def apply_occlusion(self, img, amount):
         return self.face_masks.apply_occlusion(img, amount)
     
-    def apply_dfl_xseg(self, img, amount, mouth, parameters):
-        return self.face_masks.apply_dfl_xseg(img, amount, mouth, parameters)
+    # UPDATED SIGNATURE HERE
+    def apply_dfl_xseg(self, original_input_img_256, original_input_img_512, kps_5_for_masking, mouth_mask_from_parser_512, parameters):
+        return self.face_masks.apply_dfl_xseg(original_input_img_256, original_input_img_512, kps_5_for_masking, mouth_mask_from_parser_512, parameters)
     
     def apply_face_parser(self, img, parameters, mode):
         return self.face_masks.apply_face_parser(img, parameters, mode)
@@ -407,3 +377,5 @@ class ModelsProcessor(QtCore.QObject):
 
     def apply_fake_diff(self, swapped_face, original_face, lower_limit_thresh, lower_value, upper_thresh, upper_value, middle_value):
         return self.face_masks.apply_fake_diff(swapped_face, original_face, lower_limit_thresh, lower_value, upper_thresh, upper_value, middle_value)
+
+```
