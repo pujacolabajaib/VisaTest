@@ -66,80 +66,119 @@ class FaceMasks:
             self.models_processor.syncvec.cpu()
         self.models_processor.models['Occluder'].run_with_iobinding(io_binding)
 
-    def apply_dfl_xseg(self, img, amount, mouth, parameters):
-        amount2 = -parameters["DFLXSeg2SizeSlider"]
-        
-        img = img.type(torch.float32)
-        img = torch.div(img, 255)
-        img = torch.unsqueeze(img, 0).contiguous()
-        outpred = torch.ones((256,256), dtype=torch.float32, device=self.models_processor.device).contiguous()
+    def _apply_xseg_amount_and_blur(self, mask_tensor, amount, blur_slider_value):
+        # mask_tensor is expected to be [1, 256, 256]
+        # Unsqueeze to add channel dimension for conv2d: [1, 1, 256, 256]
+        mask_tensor_conv = mask_tensor.unsqueeze(1)
 
-        self.run_dfl_xseg(img, outpred)
-
-        outpred = torch.clamp(outpred, min=0.0, max=1.0)
-        outpred[outpred < 0.1] = 0
-        # invert values to mask areas to keep
-        outpred = 1.0 - outpred
-        outpred = torch.unsqueeze(outpred, 0).type(torch.float32)
-
-        if amount2 != amount:
-            outpred2 = outpred.clone()
-
+        # Apply amount (dilation/erosion)
         if amount > 0:
             kernel = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
-
             for _ in range(int(amount)):
-                outpred = torch.nn.functional.conv2d(outpred, kernel, padding=(1, 1))
-                outpred = torch.clamp(outpred, 0, 1)
-
-            #outpred = torch.squeeze(outpred)
-
-        if amount < 0:
-            outpred = torch.neg(outpred)
-            outpred = torch.add(outpred, 1)
+                mask_tensor_conv = torch.nn.functional.conv2d(mask_tensor_conv, kernel, padding=(1, 1))
+                mask_tensor_conv = torch.clamp(mask_tensor_conv, 0, 1)
+        elif amount < 0:
+            # Invert, dilate, then invert back for erosion effect
+            mask_tensor_conv = 1.0 - mask_tensor_conv
             kernel = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
-
             for _ in range(int(-amount)):
-                outpred = torch.nn.functional.conv2d(outpred, kernel, padding=(1, 1))
-                outpred = torch.clamp(outpred, 0, 1)
-
-            #outpred = torch.squeeze(outpred)
-            outpred = torch.neg(outpred)
-            outpred = torch.add(outpred, 1)
+                mask_tensor_conv = torch.nn.functional.conv2d(mask_tensor_conv, kernel, padding=(1, 1))
+                mask_tensor_conv = torch.clamp(mask_tensor_conv, 0, 1)
+            mask_tensor_conv = 1.0 - mask_tensor_conv
         
-        gauss = transforms.GaussianBlur(parameters['OccluderXSegBlurSlider']*2+1, (parameters['OccluderXSegBlurSlider']+1)*0.2)
-        outpred = gauss(outpred)  
-        if amount2 != amount:
-            if amount2 > 0:
-                kernel2 = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
+        # Apply Gaussian Blur
+        if blur_slider_value > 0:
+            blur_k = blur_slider_value * 2 + 1
+            blur_sigma = (blur_slider_value + 1) * 0.2 
+            if blur_sigma > 0: # Ensure sigma is positive
+                 gauss = transforms.GaussianBlur(blur_k, blur_sigma)
+                 mask_tensor_conv = gauss(mask_tensor_conv)
+        
+        # Squeeze back to [1, 256, 256]
+        return torch.clamp(mask_tensor_conv.squeeze(1), 0, 1)
 
-                for _ in range(int(amount2)):
-                    outpred2 = torch.nn.functional.conv2d(outpred2, kernel2, padding=(1, 1))
-                    outpred2 = torch.clamp(outpred2, 0, 1)
+    def apply_dfl_xseg(self, img, amount, mouth, parameters): # amount is from DFLXSegSizeSlider
+        # Get slider values
+        # The 'amount' parameter to this function is the original DFLXSegSizeSlider value from frame_worker,
+        # which is NEGATED (-parameters["DFLXSegSizeSlider"]).
+        # So, if slider was 10 (grow), `amount` is -10.
+        # Helper _apply_xseg_amount_and_blur expects: positive for dilate/grow, negative for erode/shrink.
+        # The values from sliders are "size", so positive means expand.
+        # If 'amount' from slider is e.g. 10 (expand), we want to pass 10 to helper.
+        # If 'amount' from slider is e.g. -10 (shrink), we want to pass -10 to helper.
+        # The original code did `amount2 = -parameters["DFLXSeg2SizeSlider"]`.
+        # So, if slider is positive for "grow", we need to use it as is for the helper's 'amount'.
+        # The 'amount' parameter passed to this function is already the direct slider value.
+        
+        # Let's use slider values directly. Positive = grow/dilate, Negative = shrink/erode.
+        # The helper function's 'amount' parameter expects this convention.
+        
+        param_dflx_seg_size = parameters.get("DFLXSegSizeSlider", 0) # This is what 'amount' should be
+        param_inside_size = parameters.get("DFLXSegInsideFaceSizeSlider", param_dflx_seg_size)
+        param_mouth_size = parameters.get("DFLXSeg2SizeSlider", 0)
 
-                #outpred2 = torch.squeeze(outpred2)
+        # For _apply_xseg_amount_and_blur, positive amount = dilate, negative amount = erode.
+        # Sliders: positive = grow, negative = shrink. So, direct mapping.
+        
+        effective_amount_outside = param_dflx_seg_size
+        effective_amount_inside = param_inside_size
+        effective_amount_mouth = param_mouth_size
 
-            if amount2 < 0:
-                outpred2 = torch.neg(outpred2)
-                outpred2 = torch.add(outpred2, 1)
-                kernel2 = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
+        # Initial image processing and run XSeg model
+        img_tensor = img.type(torch.float32)
+        img_tensor = torch.div(img_tensor, 255)
+        img_tensor = torch.unsqueeze(img_tensor, 0).contiguous() # Shape: [1, 3, 256, 256]
+        
+        # outpred is initialized for model output, should be [1, 1, 256, 256] or [256, 256]
+        outpred_model = torch.ones((256,256), dtype=torch.float32, device=self.models_processor.device).contiguous()
+        self.run_dfl_xseg(img_tensor, outpred_model) # run_dfl_xseg expects [1,3,256,256] and [256,256] for output
 
-                for _ in range(int(-amount2)):
-                    outpred2 = torch.nn.functional.conv2d(outpred2, kernel2, padding=(1, 1))
-                    outpred2 = torch.clamp(outpred2, 0, 1)
+        # outpred_model is now raw XSeg output (likely 0-1, higher is salient)
+        raw_xseg_output = outpred_model.clone() # Shape: [256, 256]
+        if raw_xseg_output.dim() == 2:
+            raw_xseg_output = raw_xseg_output.unsqueeze(0) # Ensure [1, 256, 256] for consistency
 
-                #outpred2 = torch.squeeze(outpred2)
-                outpred2 = torch.neg(outpred2)
-                outpred2 = torch.add(outpred2, 1)
-                
-            gauss = transforms.GaussianBlur(parameters['XSeg2BlurSlider']*2+1, (parameters['XSeg2BlurSlider']+1)*0.2)
-            outpred2 = gauss(outpred2) 
-            
-            #print("outpred, outpred2, mouth: ", outpred.shape, outpred2.shape, mouth.shape)
-            outpred[mouth > 0.9] = outpred2[mouth > 0.9]
+        # Process raw XSeg output for inversion: clamp, threshold
+        processed_raw_xseg_mask = torch.clamp(outpred_model, min=0.0, max=1.0)
+        processed_raw_xseg_mask[processed_raw_xseg_mask < 0.1] = 0
+        
+        # This is the base mask for applying XSeg effects (1 means effect area)
+        # It's unsqueezed to [1, 256, 256]
+        inverted_xseg_mask_base = (1.0 - processed_raw_xseg_mask).unsqueeze(0).type(torch.float32)
 
-        outpred = torch.reshape(outpred, (1, 256, 256))
-        return outpred
+        # Create processed masks using the helper
+        # OccluderXSegBlurSlider for general face area blur
+        blur_general = parameters.get('OccluderXSegBlurSlider', 0)
+        final_mask_inside = self._apply_xseg_amount_and_blur(inverted_xseg_mask_base.clone(), effective_amount_inside, blur_general)
+        final_mask_outside = self._apply_xseg_amount_and_blur(inverted_xseg_mask_base.clone(), effective_amount_outside, blur_general)
+
+        # Define the "core face" region using the raw XSeg output (before inversion)
+        # raw_xseg_output is [1, 256, 256], higher values are face
+        core_face_region = raw_xseg_output > 0.5 # Boolean mask [1, 256, 256]
+
+        # Combine masks
+        final_combined_mask = torch.zeros_like(inverted_xseg_mask_base) # [1, 256, 256]
+        
+        # Apply inside processing to core face region
+        final_combined_mask[core_face_region] = final_mask_inside[core_face_region]
+        # Apply outside processing to non-core face region (inverse of core_face_region)
+        final_combined_mask[~core_face_region] = final_mask_outside[~core_face_region]
+
+        # Apply mouth-specific mask if XSegMouthEnableToggle is true
+        if parameters.get("XSegMouthEnableToggle", False):
+            # XSeg2BlurSlider for mouth area blur
+            blur_mouth = parameters.get('XSeg2BlurSlider', 0)
+            final_mask_mouth = self._apply_xseg_amount_and_blur(inverted_xseg_mask_base.clone(), effective_amount_mouth, blur_mouth)
+            if mouth is not None and mouth.shape == inverted_xseg_mask_base.shape:
+                mouth_bool = mouth > 0.9 # mouth is [1, 256, 256]
+                final_combined_mask[mouth_bool] = final_mask_mouth[mouth_bool]
+            elif mouth is not None and mouth.dim() == 2 and mouth.shape == inverted_xseg_mask_base.shape[1:]: # if mouth is [256,256]
+                mouth_squeezed = mouth.unsqueeze(0) # make it [1,256,256]
+                mouth_bool = mouth_squeezed > 0.9
+                final_combined_mask[mouth_bool] = final_mask_mouth[mouth_bool]
+
+
+        return final_combined_mask.reshape((1, 256, 256))
 
     def run_dfl_xseg(self, image, output):
         if not self.models_processor.models['XSeg']:
@@ -628,3 +667,5 @@ class FaceMasks:
         return result.unsqueeze(0)  # (1, H, W)
 
 
+
+[end of app/processors/face_masks.py]

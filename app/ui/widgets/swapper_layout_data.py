@@ -475,6 +475,17 @@ SWAPPER_LAYOUT_DATA: LayoutDictTypes = {
             'requiredToggleValue': True,
             'help': 'Grows or shrinks the occluded region.'
         },
+        'DFLXSegInsideFaceSizeSlider': {
+            'level': 2,
+            'label': 'Inside Face Size',
+            'min_value': '-20',
+            'max_value': '20',
+            'default': '0',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Grows or shrinks the XSeg mask for the area considered "inside" the face. Uses DFLXSegSizeSlider value by default if not set.'
+        },
         'XSeg2BlurSlider': {
             'level': 1,
             'label': 'XSeg2 Blur',
