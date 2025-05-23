@@ -486,6 +486,17 @@ SWAPPER_LAYOUT_DATA: LayoutDictTypes = {
             'requiredToggleValue': True,
             'help': 'Grows or shrinks the XSeg mask for the area considered "inside" the face. Uses DFLXSegSizeSlider value by default if not set.'
         },
+        'DFLXSegTransitionSmoothnessSlider': {
+            'level': 2, 
+            'label': 'Transition Smoothness',
+            'min_value': '0', 
+            'max_value': '20', 
+            'default': '5',
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': 'Controls the smoothness of the transition between inside and outside face XSeg areas. 0 for a hard edge, higher for a softer transition.'
+        },
         'XSeg2BlurSlider': {
             'level': 1,
             'label': 'XSeg2 Blur',
