@@ -97,12 +97,13 @@ class FaceMasks:
         # Squeeze back to [1, 256, 256]
         return torch.clamp(mask_tensor_conv.squeeze(1), 0, 1)
 
-    def apply_dfl_xseg(self, img, amount_param_not_used, mouth, parameters): # amount_param_not_used is from DFLXSegSizeSlider but not used directly
+    def apply_dfl_xseg(self, img, amount_param_not_used, mouth, parameters): 
         
         param_dflx_seg_size = parameters.get("DFLXSegSizeSlider", 0) 
-        param_inside_size = parameters.get("DFLXSegInsideFaceSizeSlider", 0) # Default to 0 if not set
+        param_inside_size = parameters.get("DFLXSegInsideFaceSizeSlider", 0) 
         param_mouth_size = parameters.get("DFLXSeg2SizeSlider", 0)
         smoothness_slider_val = parameters.get("DFLXSegTransitionSmoothnessSlider", 0)
+        boundary_offset_val = parameters.get("DFLXSegBoundaryOffsetSlider", 0)
 
         effective_amount_outside = param_dflx_seg_size
         effective_amount_inside = param_inside_size
@@ -131,20 +132,41 @@ class FaceMasks:
         core_face_region = raw_xseg_output > 0.5 
         core_face_region_float = core_face_region.float() # Convert boolean to float [1, 256, 256]
 
+        if boundary_offset_val != 0:
+            # core_face_region_float is [1, 256, 256]. Unsqueeze for conv2d.
+            temp_boundary_mask = core_face_region_float.unsqueeze(1) # Shape: [1, 1, 256, 256]
+            
+            amount_offset = boundary_offset_val 
+            
+            if amount_offset > 0:
+                kernel = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
+                for _ in range(int(amount_offset)): # Iterate 'amount_offset' times for dilation
+                    temp_boundary_mask = torch.nn.functional.conv2d(temp_boundary_mask, kernel, padding=(1, 1))
+                    temp_boundary_mask = torch.clamp(temp_boundary_mask, 0, 1) 
+            elif amount_offset < 0:
+                # For erosion: invert, dilate, then invert back
+                temp_boundary_mask = 1.0 - temp_boundary_mask
+                kernel = torch.ones((1,1,3,3), dtype=torch.float32, device=self.models_processor.device)
+                for _ in range(int(-amount_offset)): # Iterate absolute 'amount_offset' times
+                    temp_boundary_mask = torch.nn.functional.conv2d(temp_boundary_mask, kernel, padding=(1, 1))
+                    temp_boundary_mask = torch.clamp(temp_boundary_mask, 0, 1)
+                temp_boundary_mask = 1.0 - temp_boundary_mask
+            
+            core_face_region_float = temp_boundary_mask.squeeze(1) # Back to [1, 256, 256]
+            core_face_region_float = torch.clamp(core_face_region_float, 0, 1) # Ensure it's still 0-1
+
         if smoothness_slider_val > 0:
-            # core_face_region_float is [1, 256, 256]. Add channel dim for blur.
-            temp_mask_for_blur = core_face_region_float.unsqueeze(1) # Becomes [1, 1, 256, 256]
+            temp_mask_for_blur = core_face_region_float.unsqueeze(1) 
             
             blur_k_smooth = smoothness_slider_val * 2 + 1
-            blur_sigma_smooth = (smoothness_slider_val * 0.5) + 0.1 # Adjusted sigma calculation
+            blur_sigma_smooth = (smoothness_slider_val * 0.5) + 0.1 
             if blur_sigma_smooth > 0:
                 gauss_smoother = transforms.GaussianBlur(blur_k_smooth, blur_sigma_smooth)
                 blurred_core_face_mask_channels = gauss_smoother(temp_mask_for_blur)
-                core_face_region_float = blurred_core_face_mask_channels.squeeze(1) # Back to [1, 256, 256]
+                core_face_region_float = blurred_core_face_mask_channels.squeeze(1) 
         
-        # Blending based on the (potentially blurred) core_face_region_float
         final_combined_mask = final_mask_inside * core_face_region_float + final_mask_outside * (1.0 - core_face_region_float)
-        final_combined_mask = torch.clamp(final_combined_mask, 0, 1) # Ensure values are valid probabilities
+        final_combined_mask = torch.clamp(final_combined_mask, 0, 1) 
 
 
         if parameters.get("XSegMouthEnableToggle", False):

@@ -497,6 +497,17 @@ SWAPPER_LAYOUT_DATA: LayoutDictTypes = {
             'requiredToggleValue': True,
             'help': 'Controls the smoothness of the transition between inside and outside face XSeg areas. 0 for a hard edge, higher for a softer transition.'
         },
+        'DFLXSegBoundaryOffsetSlider': {
+            'level': 2,
+            'label': 'Boundary Offset',
+            'min_value': '-10', # Shrink 'inside' area
+            'max_value': '10',  # Expand 'inside' area
+            'default': '0',     # No offset
+            'step': 1,
+            'parentToggle': 'DFLXSegEnableToggle',
+            'requiredToggleValue': True,
+            'help': "Adjusts the boundary between 'inside' and 'outside' face XSeg areas. Positive values expand the 'inside' area, negative values shrink it."
+        },
         'XSeg2BlurSlider': {
             'level': 1,
             'label': 'XSeg2 Blur',
