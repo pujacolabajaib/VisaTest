@@ -100,7 +100,7 @@ class FaceMasks:
     def apply_dfl_xseg(self, img, amount_param_not_used, mouth, parameters): # amount_param_not_used is from DFLXSegSizeSlider but not used directly
         
         param_dflx_seg_size = parameters.get("DFLXSegSizeSlider", 0) 
-        param_inside_size = parameters.get("DFLXSegInsideFaceSizeSlider", param_dflx_seg_size) 
+        param_inside_size = parameters.get("DFLXSegInsideFaceSizeSlider", 0) # Default to 0 if not set
         param_mouth_size = parameters.get("DFLXSeg2SizeSlider", 0)
         smoothness_slider_val = parameters.get("DFLXSegTransitionSmoothnessSlider", 0)
 
